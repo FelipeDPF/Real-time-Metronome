@@ -83,15 +83,16 @@ void *metronomeThread(void *arg){
 	timeSigTop = stuff->timeSigTop;
 	timeSigBot = stuff->timeSigBot;
 
+	// The metronome would output 120 beats per minute (  60 sec / 120 beats = 0.5 sec / beat).
 	double beat =(double) 60 / beatPerMin;
-	printf( "beat [%f]\n",beat);
+	printf( "beat [%.2f]\n",beat);
 
 	double perMeasure = beat * 2;
-	printf( "perMeasure [%f]\n",perMeasure);
+	printf( "perMeasure [%.2f]\n",perMeasure);
 
 	double perInterval =  (double) perMeasure  / timeSigBot;
 
-	printf( "perInterval [%f]\n",perInterval);
+	printf( "perInterval [%.2f]\n",perInterval);
 
 	//	itime.it_value.tv_sec = 1;
 	//	/* 500 million nsecs = .5 secs */
@@ -199,12 +200,11 @@ int io_write(resmgr_context_t *ctp, io_write_t *msg, RESMGR_OCB_T *ocb)
 			small_integer = atoi(alert_msg);
 			if (small_integer >= 1 && small_integer <= 9)
 			{
-				//FIXME :: replace getprio() with SchedGet()
 				MsgSendPulse(attach->chid, SchedGet(0, 0, NULL), MY_PAUSE_CODE, small_integer);
 			}
 			else
 			{
-				printf("Integer is not between 1 and 9.\n");
+				printf("\nInteger is not between 1 and 9.\n");
 			}
 		}
 		else if (strstr(buf, "info") != NULL)
@@ -280,7 +280,6 @@ int main(int argc, char *argv[])
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_create(NULL, &attr, &metronomeThread, &stuff);
-
 
 	while (1)
 	{
