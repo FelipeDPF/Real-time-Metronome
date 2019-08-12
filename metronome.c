@@ -17,14 +17,17 @@
 
 #define MY_PULSE_CODE _PULSE_CODE_MINAVAIL
 #define MY_PAUSE_CODE (MY_PULSE_CODE + 1)
+#define MY_QUIT_CODE (MY_PAUSE_CODE + 1)
+#define ATTACH_POINT "metronome"
+
 // Declare the following variables that are global to myDevice:
 char data[255];
 int server_coid;
-name_attach_t * attach;
-
 int beatPerMin =0;
 int timeSigTop =0;
 int timeSigBot =0;
+
+name_attach_t * attach;
 
 typedef union {
 	struct _pulse pulse;
@@ -54,12 +57,7 @@ typedef struct input {
 	int beatPerMin;
 	int timeSigTop;
 	int timeSigBot;
-	name_attach_t * attach;
 }input ;
-
-
-#define ATTACH_POINT "metronome"
-
 
 void *metronomeThread(void *arg){
 	struct sigevent event;
@@ -68,81 +66,78 @@ void *metronomeThread(void *arg){
 	int rcvid;
 	my_message_t msg;
 
-	input * stuff = (input*) arg;
-
+	input * inputs = (input*) arg;
 
 	event.sigev_notify = SIGEV_PULSE;
-	event.sigev_coid = ConnectAttach(ND_LOCAL_NODE, 0,attach->chid,_NTO_SIDE_CHANNEL, 0);
-
-	//event.sigev_priority = getprio(0);
+	event.sigev_coid = ConnectAttach(ND_LOCAL_NODE, 0, attach->chid, _NTO_SIDE_CHANNEL, 0);
+	event.sigev_priority = SchedGet(0,0,NULL);
 	event.sigev_code = MY_PULSE_CODE;
+
 	timer_create(CLOCK_REALTIME, &event, &timer_id);
 
 	// DO THE equation
-	beatPerMin = stuff->beatPerMin;
-	timeSigTop = stuff->timeSigTop;
-	timeSigBot = stuff->timeSigBot;
+	beatPerMin = inputs->beatPerMin;
+	timeSigTop = inputs->timeSigTop;
+	timeSigBot = inputs->timeSigBot;
 
 	// The metronome would output 120 beats per minute (  60 sec / 120 beats = 0.5 sec / beat).
 	double beat =(double) 60 / beatPerMin;
-	printf( "beat [%.2f]\n",beat);
-
 	double perMeasure = beat * 2;
-	printf( "perMeasure [%.2f]\n",perMeasure);
-
 	double perInterval =  (double) perMeasure  / timeSigBot;
-
-	printf( "perInterval [%.2f]\n",perInterval);
-
-	//	itime.it_value.tv_sec = 1;
-	//	/* 500 million nsecs = .5 secs */
-	//	itime.it_value.tv_nsec = 500000000;
-	//
 	double fractional = perInterval - (int) perInterval;
-	//
-	//	itime.it_interval.tv_sec = perInterval;
-	//	/* 500 million nsecs = .5 secs */
-	//	itime.it_interval.tv_nsec = (fractional * 100000000);
-	//	timer_settime(timer_id, 0, &itime, NULL);
+
+	//printf( "beat [%.2f]\n",beat);
+	//printf( "perMeasure [%.2f]\n",perMeasure);
+	//printf( "perInterval [%.2f]\n",perInterval);
 
 	itime.it_value.tv_sec = 1;
-	/* 500 million nsecs = .5 secs */
 	itime.it_value.tv_nsec = 500000000;
 
 	itime.it_interval.tv_sec = perInterval;
-	/* 500 million nsecs = .5 secs */
 	itime.it_interval.tv_nsec = (fractional * 1e+9);
 
 	timer_settime(timer_id, 0, &itime, NULL);
+
 	int index = -1;
 	for(int i = 0; i < 8; ++i)
-		if (t->timeSigTop == timeSigTop)
-			if (t->timeSigBot == timeSigBot)
+		if (t[i].timeSigTop == inputs->timeSigTop)
+			if (t[i].timeSigBot == inputs->timeSigBot)
 				index = i;
+
+	if(index == -1){
+		printf("Incorrect pattern");
+		exit(EXIT_FAILURE);
+	}
 
 	for (;;){
 		//assign address of str to ptr
 		char *ptr;
 		ptr=t[index].Pattern;
-		while(*ptr != '\0'){
+
+		while(1){
 			// check for a pulse from the user (pause, info or quit)
-			rcvid = MsgReceive(	attach->chid, &msg, sizeof(msg), NULL);
-			/* we got a pulse */
+			rcvid = MsgReceive(attach->chid, &msg, sizeof(msg), NULL);
 			if (rcvid == 0){
 				if (msg.pulse.code == MY_PULSE_CODE)
 					printf("%c", *ptr++);
 
 				else if (msg.pulse.code == MY_PAUSE_CODE){
-					//the value for the pause
-					printf("\n%d\n",  msg.pulse.value.sival_int);
 					itime.it_value.tv_sec = msg.pulse.value.sival_int;
-					itime.it_value.tv_nsec = 0;
 					timer_settime(timer_id, 0, &itime, NULL);
 				}
-				fflush( stdout );
+				else if (msg.pulse.code == MY_QUIT_CODE){
+					printf("\nQuiting\n");
+
+					TimerDestroy(timer_id);
+					exit(EXIT_SUCCESS);
+				}
+				if(*ptr == '\0'){
+					printf("\n");
+					break;
+				}
 			}
+			fflush( stdout );
 		} /* else other messages ... */
-		printf("\n");
 	}
 	return EXIT_SUCCESS;
 }
@@ -183,38 +178,31 @@ int io_write(resmgr_context_t *ctp, io_write_t *msg, RESMGR_OCB_T *ocb)
 {
 	int nb = 0;
 
-	if (msg->i.nbytes == ctp->info.msglen - (ctp->offset + sizeof(*msg)))
-	{
+	if (msg->i.nbytes == ctp->info.msglen - (ctp->offset + sizeof(*msg))){
 		/* have all the data */
 		char *buf;
 		char *alert_msg;
 		int i, small_integer;
 		buf = (char *)(msg + 1);
 
-		if (strstr(buf, "pause") != NULL)
-		{
+		if (strstr(buf, "pause") != NULL){
 			for (i = 0; i < 2; i++)
-			{
 				alert_msg = strsep(&buf, " ");
-			}
+
 			small_integer = atoi(alert_msg);
 			if (small_integer >= 1 && small_integer <= 9)
-			{
-				MsgSendPulse(attach->chid, SchedGet(0, 0, NULL), MY_PAUSE_CODE, small_integer);
-			}
+				MsgSendPulse(server_coid, SchedGet(0, 0, NULL), MY_PAUSE_CODE, small_integer);
 			else
-			{
 				printf("\nInteger is not between 1 and 9.\n");
-			}
 		}
-		else if (strstr(buf, "info") != NULL)
-		{
-			sprintf(buf, "metronome [%d beats/min, time signature %d/%d] ", beatPerMin, timeSigTop, timeSigBot);
-		}
-		else
-		{
+		else if (strstr(buf, "info") != NULL){
+			sprintf(buf, "metronome [%d beats/min, time signature %d/%d] \n", beatPerMin, timeSigTop, timeSigBot);
 			strcpy(data, buf);
 		}
+		else if (strstr(buf, "quit") != NULL)
+			MsgSendPulse(server_coid, SchedGet(0, 0, NULL), MY_QUIT_CODE, 0);
+		else
+			printf("\nInvalid Command: %s\n", strsep(&buf, "\n"));
 
 		nb = msg->i.nbytes;
 	}
@@ -228,7 +216,7 @@ int io_write(resmgr_context_t *ctp, io_write_t *msg, RESMGR_OCB_T *ocb)
 
 int io_open(resmgr_context_t *ctp, io_open_t *msg, RESMGR_HANDLE_T *handle, void *extra)
 {
-	if ((attach->chid = name_open(ATTACH_POINT, 0)) == -1)
+	if ((server_coid = name_open(ATTACH_POINT, 0)) == -1)
 	{
 		perror("name_open failed.");
 		return EXIT_FAILURE;
@@ -247,27 +235,25 @@ int main(int argc, char *argv[])
 
 	attach = name_attach(NULL, ATTACH_POINT, 0);
 
-	// exit FAILURE if name_attach() failed
 	if(attach == NULL){
 		perror("failed to create the channel.");
 		exit(EXIT_FAILURE);
 	}
 
-	if (argc != 4)
-	{
-		perror("Not enough arguments.");
+	if (argc != 4){
+		perror("Not the correct arguments.");
 		exit(EXIT_FAILURE);
 	}
 
-	struct input stuff = {
+	struct input inputs = {
 			atoi(argv[1]),
 			atoi(argv[2]),
 			atoi(argv[3]),
-			attach
 	};
 
 	dpp = dispatch_create();
 	iofunc_func_init(_RESMGR_CONNECT_NFUNCS, &connect_funcs, _RESMGR_IO_NFUNCS, &io_funcs);
+
 	connect_funcs.open = io_open;
 	io_funcs.read = io_read;
 	io_funcs.write = io_write;
@@ -279,14 +265,15 @@ int main(int argc, char *argv[])
 
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
-	pthread_create(NULL, &attr, &metronomeThread, &stuff);
+	pthread_create(NULL, &attr, &metronomeThread, &inputs);
 
-	while (1)
-	{
+	while (1){
 		ctp = dispatch_block(ctp);
 		dispatch_handler(ctp);
 	}
+
 	pthread_attr_destroy(&attr);
+	name_detach(attach, 0);
 
 	return EXIT_SUCCESS;
 }
