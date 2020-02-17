@@ -25,6 +25,6 @@ With output:
 (the “|1” characters occur every 5*60/200 = 1.5 sec)
 Display a usage message and terminate with failure if the exact number of command-line arguments is not received.
 
-# For more information on how to complete this project... check the PDF file!
+# Please check the PDF File for more information on how to complete the project
 
 
